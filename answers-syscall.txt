@@ -1,0 +1,6 @@
+usertrap()
+0x7 reprezentuje SYS_exec call
+user mode pretoze v tom mode bol zavolany SYS_exec pre init
+lw, num je v registry a3
+jadro spadlo pretoze hladana adresa 0 sa nenachadza vo validnom adresnom priestore co vyvolalo exception code 0xd (load page fault)
+nazov je "initcode\000\000\000\000\000\000\000" alebo tiez init a pid je 1
