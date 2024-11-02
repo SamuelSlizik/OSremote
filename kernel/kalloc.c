@@ -9,6 +9,8 @@
 #include "riscv.h"
 #include "defs.h"
 
+#define PA2IND(pa) (((uint64)pa - (uint64)end)/PGSIZE)
+
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
@@ -21,13 +23,33 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
+  uint64 *refcnt;
 } kmem;
+
+void
+inc_ref(uint64 addr) {
+  kmem.refcnt[PA2IND(addr)]++;
+}
+
+void
+dec_ref(uint64 addr) {
+  kmem.refcnt[PA2IND(addr)]--;
+}
 
 void
 kinit()
 {
+  int framecount = 0;
+
+  kmem.refcnt = (uint64 *)end;
+
+  for (uint64 address = (uint64)end; address < PHYSTOP; address += PGSIZE) {
+    kmem.refcnt[PA2IND(address)] = 1;
+    framecount++;
+  }
+
   initlock(&kmem.lock, "kmem");
-  freerange(end, (void*)PHYSTOP);
+  freerange(end + framecount * sizeof(int), (void*)PHYSTOP);
 }
 
 void
@@ -48,15 +70,29 @@ kfree(void *pa)
 {
   struct run *r;
 
-  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+  acquire(&kmem.lock);
+
+  kmem.refcnt[PA2IND(pa)]--;
+
+  if (kmem.refcnt[PA2IND(pa)] > 0){
+    release(&kmem.lock);
+    return;
+  }
+
+  if (kmem.refcnt[PA2IND(pa)] < 0){
+    release(&kmem.lock);
+    panic("kfree: double free");
+  }
+
+  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP){
+    release(&kmem.lock);
     panic("kfree");
+  }
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
   r = (struct run*)pa;
-
-  acquire(&kmem.lock);
   r->next = kmem.freelist;
   kmem.freelist = r;
   release(&kmem.lock);
@@ -72,11 +108,14 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r){
     kmem.freelist = r->next;
+    kmem.refcnt[PA2IND(r)]++;
+  }
   release(&kmem.lock);
 
-  if(r)
+  if(r){
     memset((char*)r, 5, PGSIZE); // fill with junk
+  }
   return (void*)r;
 }
