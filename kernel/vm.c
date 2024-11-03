@@ -489,9 +489,39 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 
 #ifdef LAB_PGTBL
 void
-vmprint(pagetable_t pagetable) {
-  // your code here
+printchild(pagetable_t pagetable, uint64 level, uint64 va) {
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if(pte & PTE_V){
+      for(int i = 3; i > level; i--){
+        printf(" ..");
+      }
+      printf("0x%p: pte 0x%p: pa 0x%p\n", (uint64 *)va, (uint64 *)pte, (uint64 *)PTE2PA(pte));
+      if((pte & (PTE_R|PTE_W|PTE_X)) == 0){
+        // this PTE points to a lower-level page table.
+        uint64 child = PTE2PA(pte);
+        printchild((pagetable_t)child, level - 1, va);
+      }
+    }
+    va += (PGSIZE << (9 * level));
+  }
 }
+
+void
+vmprint(pagetable_t pagetable) {
+  printf("page table 0x%p\n", (uint64 *) pagetable);
+  printchild(pagetable, 2, 0);
+}
+
+// The risc-v Sv39 scheme has three levels of page-table
+// pages. A page-table page contains 512 64-bit PTEs.
+// A 64-bit virtual address is split into five fields:
+//   39..63 -- must be zero.
+//   30..38 -- 9 bits of level-2 index.
+//   21..29 -- 9 bits of level-1 index.
+//   12..20 -- 9 bits of level-0 index.
+//    0..11 -- 12 bits of byte offset within the page.
 #endif
 
 
